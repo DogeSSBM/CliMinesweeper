@@ -69,9 +69,9 @@ void printX(const int x)
 
 void printLine(const int x)
 {
-    for(int i = 0; i <= x; i++){
+    for(int i = 0; i <= x; i++)
         fputs("---+", stdout);
-    }
+
     fputs("---\n", stdout);
 }
 
@@ -88,7 +88,7 @@ void boardPrint(const Board board, const bool reveal)
                         if(board.tile[x][y].num == -1)
                             fputs("[B]|", stdout);
                         else
-                            printf("[%c]|", board.tile[x][y].num == 0 ? ']' : '0'+board.tile[x][y].num);
+                            printf("[%c]|", board.tile[x][y].num == 0 ? ' ' : '0'+board.tile[x][y].num);
                     else
                         fputs("[ ]|", stdout);
                     break;
@@ -135,7 +135,6 @@ Board boardParse(char** boardArgs)
         exit(EXIT_FAILURE);
     }
 
-
     if((int)board.numBombs >= (board.len.x * board.len.y)-8){
         fprintf(stderr, "board.numBombs: %u\nmust be < %u\n(board.len.x(%u) * board.len.y(%u))\n",
             board.numBombs, board.len.x * board.len.y, board.len.x, board.len.y
@@ -174,7 +173,6 @@ Board boardAlloc(Board board)
         }
         free(board.tile);
     }
-
 
     board.tile = calloc(board.len.x, sizeof(Tile*));
     for(int x = 0; x < board.len.x; x++)
@@ -238,6 +236,29 @@ uint boardTilesLeft(const Board board)
     return left;
 }
 
+Board boardIncAdj(Board board, const Coord pos)
+{
+    for(int x = -1; x <= 1; x++){
+        for(int y = -1; y <= 1; y++){
+            const Coord adjpos = {.x = pos.x + x, .y = pos.y + y};
+            if((x == 0 && y == 0) || !cLen(adjpos, board.len) || board.tile[adjpos.x][adjpos.y].num == -1)
+                continue;
+            board.tile[adjpos.x][adjpos.y].num++;
+        }
+    }
+    return board;
+}
+
+Board boardSetNums(Board board)
+{
+    for(int y = 0; y < board.len.y; y++)
+        for(int x = 0; x < board.len.x; x++)
+            if(board.tile[x][y].num == -1)
+                board = boardIncAdj(board, (const Coord){.x=x, .y=y});
+
+    return board;
+}
+
 Board boardPlaceBombs(Board board, const Coord fst)
 {
     for(uint i = 0; i < board.numBombs; i++){
@@ -245,27 +266,17 @@ Board boardPlaceBombs(Board board, const Coord fst)
         do{
             pos.x = rand() % board.len.x;
             pos.y = rand() % board.len.y;
-            for(int x = -1; x <= 1; x++){
-                for(int y = -1; y <= 1; y++){
-                    const Coord adjpos = {.x = pos.x + x, .y = pos.y + y};
-                    if((x == 0 && y == 0) || !cLen(pos, board.len))
-                        continue;
-                    if(cEq(adjpos, fst))
-                        pos = adjpos;
-                }
-            }
-        }while(cEq(pos, fst) || board.tile[pos.x][pos.y].num == -1);
+        }while(
+            cEq(pos, fst) ||
+            board.tile[pos.x][pos.y].num == -1 || (
+                pos.x >= fst.x-1 && pos.x <= fst.x+1 &&
+                pos.y >= fst.y-1 && pos.y <= fst.y+1
+            )
+        );
         board.tile[pos.x][pos.y].num = -1;
-        for(int x = -1; x <= 1; x++){
-            for(int y = -1; y <= 1; y++){
-                if((x == 0 && y == 0) || !iLen(pos.x+x, pos.y+y, board.len))
-                    continue;
-                board.tile[pos.x+x][pos.y+y].num++;
-            }
-        }
     }
     board.state = G_PLAY;
-    return floodAt(board, fst);
+    return floodAt(boardSetNums(board), fst);
 }
 
 void actionHelp(void)
@@ -337,8 +348,7 @@ bool actionValidate(const Board board, char *str, Action *act)
         flush();
         return false;
     }
-    // "r 10 10"
-    // "r 1 1"
+
     if(slen < 5 || slen > 7){
         if(str[slen] != '\0' && str[slen] != '\n')
         printf("1 %u\n", slen);
