@@ -30,25 +30,14 @@ typedef struct{
 typedef struct{
     GameState state;
     Coord len;
-    uint numBombs;
+    int numBombs;
     Tile **tile;
 }Board;
 
 void usage(void)
 {
-    fprintf(stderr, "Usage: ./main.out <grid width> <grid height> <num bombs>\n");
-}
-
-uint strUint(char *str)
-{
-    char *end = NULL;
-    unsigned long ret = strtoul(str, &end, 0);
-    if(errno == ERANGE || end != str+strlen(str)){
-        fprintf(stderr, "Error parsing uint from: \"%s\"\n", str);
-        usage();
-        exit(EXIT_FAILURE);
-    }
-    return ret;
+    fprintf(stderr, "Usage: ./main.out <grid width 0..99> <grid height 0..99> <num bombs 0..99>\n");
+    exit(EXIT_FAILURE);
 }
 
 void boardPrintInfo(const Board board)
@@ -69,9 +58,9 @@ void printX(const int x)
 
 void printLine(const int x)
 {
-    for(int i = 0; i <= x; i++)
+    for(int i = 0; i <= x; i++){
         fputs("---+", stdout);
-
+    }
     fputs("---\n", stdout);
 }
 
@@ -118,37 +107,48 @@ void boardPrint(const Board board, const bool reveal)
     fputs("\n", stdout);
 }
 
+bool parseLe2(char **strptr, int *num)
+{
+    const uint slen  = strlen(*strptr);
+    if(slen < 1 || !isdigit(**strptr))
+        return false;
+    *num = **strptr - '0';
+    (*strptr)++;
+    if(slen == 1)
+        return true;
+    if(isspace(**strptr))
+        return true;
+    if(!isdigit(**strptr))
+        return false;
+    *num *= 10;
+    *num += **strptr - '0';
+    (*strptr)++;
+    return true;
+}
+
 Board boardParse(char** boardArgs)
 {
-    Board board = {
-        .len = (Coord){
-            .x = strUint(boardArgs[0]),
-            .y = strUint(boardArgs[1])
-        },
-        .numBombs = strUint(boardArgs[2])
-    };
+    if(strlen(boardArgs[0]) > 2 || strlen(boardArgs[1]) > 2 || strlen(boardArgs[2]) > 2){
+        usage();
+    }
+    Board board = {0};
+    int* bi[3] = {&board.len.x, &board.len.y, &board.numBombs};
+    for(uint i = 0; i < 3; i++){
+        char *pos = boardArgs[i];
+        if(!parseLe2(&pos, bi[i]) || *pos != '\0'){
+            printf("itr:%i\n", i);
+            usage();
+        }
+    }
 
-    if(board.len.x < 4 || board.len.y < 4){
-        fprintf(stderr, "board.board.len.x(%u) and board.len.y(%u) must be >= 4\n",
+    if(board.len.x < 4 || board.len.y < 4 || board.len.x >= 99 || board.len.y >= 99 ||
+    ((int)board.numBombs >= (board.len.x * board.len.y)-8)){
+        fprintf(stderr, "board.numBombs: %u must be < %u\n(board.len.x(%u) * board.len.y(%u))\nboard.board.len.x(%u) and board.len.y(%u) must be >= 4 and < 99\n",
+            board.numBombs, board.len.x * board.len.y, board.len.x, board.len.y,
             board.len.x, board.len.y
         );
         exit(EXIT_FAILURE);
     }
-
-    if((int)board.numBombs >= (board.len.x * board.len.y)-8){
-        fprintf(stderr, "board.numBombs: %u\nmust be < %u\n(board.len.x(%u) * board.len.y(%u))\n",
-            board.numBombs, board.len.x * board.len.y, board.len.x, board.len.y
-        );
-        exit(EXIT_FAILURE);
-    }
-
-    if(board.len.x > 99 || board.len.y > 99){
-        fprintf(stderr, "board.board.len.x(%u) and board.len.y(%u) must be <= 99\n",
-            board.len.x, board.len.y
-        );
-        exit(EXIT_FAILURE);
-    }
-
     return board;
 }
 
@@ -166,39 +166,15 @@ Board boardFree(Board board)
 
 Board boardAlloc(Board board)
 {
-    if(board.tile){
-        for(int x = 0; x < board.len.x; x++){
-            if(board.tile[x])
-                free(board.tile[x]);
-        }
-        free(board.tile);
-    }
-
     board.tile = calloc(board.len.x, sizeof(Tile*));
     for(int x = 0; x < board.len.x; x++)
         board.tile[x] = calloc(board.len.y, sizeof(Tile));
-
     return board;
 }
 
-bool iLen(const int x, const int y, const Coord len)
+bool inBound(const Coord pos, const Coord len)
 {
-    return x > 0 && y > 0 && x < len.x && y < len.y;
-}
-
-bool cLen(const Coord pos, const Coord len)
-{
-    return iLen(pos.x, pos.y, len);
-}
-
-Coord cOff(const Coord pos, const Coord off)
-{
-    return (const Coord){.x=pos.x+off.x, .y=pos.y+off.y};
-}
-
-bool cEq(const Coord a, const Coord b)
-{
-    return a.x == b.x && a.y == b.y;
+    return pos.x >= 0 && pos.y >= 0 && pos.x < len.x && pos.y < len.y;
 }
 
 Board floodAt(Board board, const Coord pos)
@@ -213,7 +189,7 @@ Board floodAt(Board board, const Coord pos)
     for(int x = -1; x <= 1; x++){
         for(int y = -1; y <= 1; y++){
             const Coord adjpos = (const Coord){.x = pos.x+x, .y = pos.y+y};
-            if((x == 0 && y == 0) || !cLen(adjpos, board.len))
+            if((x == 0 && y == 0) || !inBound(adjpos, board.len))
                 continue;
             const int adjnum = board.tile[adjpos.x][adjpos.y].num;
             const TileState adjstate = board.tile[adjpos.x][adjpos.y].state;
@@ -236,47 +212,29 @@ uint boardTilesLeft(const Board board)
     return left;
 }
 
-Board boardIncAdj(Board board, const Coord pos)
-{
-    for(int x = -1; x <= 1; x++){
-        for(int y = -1; y <= 1; y++){
-            const Coord adjpos = {.x = pos.x + x, .y = pos.y + y};
-            if((x == 0 && y == 0) || !cLen(adjpos, board.len) || board.tile[adjpos.x][adjpos.y].num == -1)
-                continue;
-            board.tile[adjpos.x][adjpos.y].num++;
-        }
-    }
-    return board;
-}
-
-Board boardSetNums(Board board)
-{
-    for(int y = 0; y < board.len.y; y++)
-        for(int x = 0; x < board.len.x; x++)
-            if(board.tile[x][y].num == -1)
-                board = boardIncAdj(board, (const Coord){.x=x, .y=y});
-
-    return board;
-}
-
 Board boardPlaceBombs(Board board, const Coord fst)
 {
-    for(uint i = 0; i < board.numBombs; i++){
+    for(int i = 0; i < board.numBombs; i++){
         Coord pos = {0};
         do{
             pos.x = rand() % board.len.x;
             pos.y = rand() % board.len.y;
         }while(
-            cEq(pos, fst) ||
-            board.tile[pos.x][pos.y].num == -1 || (
-                pos.x >= fst.x-1 && pos.x <= fst.x+1 &&
-                pos.y >= fst.y-1 && pos.y <= fst.y+1
-            )
+            (pos.x >= fst.x-1 && pos.y >= fst.y-1 && pos.x <= fst.x+1 && pos.y <= fst.y+1) ||
+            board.tile[pos.x][pos.y].num == -1
         );
         board.tile[pos.x][pos.y].num = -1;
+        for(int x = -1; x <= 1; x++){
+            for(int y = -1; y <= 1; y++){
+                const Coord adjpos = {.x = pos.x + x, .y = pos.y +y};
+                if((x == 0 && y == 0) || !inBound(adjpos, board.len))
+                    continue;
+                board.tile[pos.x+x][pos.y+y].num++;
+            }
+        }
     }
     board.state = G_PLAY;
-    return floodAt(boardSetNums(board), fst);
+    return floodAt(board, fst);
 }
 
 void actionHelp(void)
@@ -286,21 +244,6 @@ void actionHelp(void)
     fputs("\tTo flag a tile:\n\t\tf <x position> <y positon>\n", stdout);
     fputs("\tTo question mark a tile:\n\t\tq <x position> <y positon>\n", stdout);
     fputs("\tTo unmark a tile:\n\t\tu <x position> <y positon>\n", stdout);
-
-}
-
-void flush(void)
-{
-    int c = ' ';
-    while((c = fgetc(stdin)) != '\n' && c != '\0');
-}
-
-uint strnlen(const char *str, const uint max)
-{
-    for(uint i = 0; i < max; i++)
-        if(str[i] == '\0' || str[i] =='\n')
-            return i;
-    return max;
 }
 
 TileState actionChar(const char c)
@@ -324,72 +267,26 @@ TileState actionChar(const char c)
     return TS_INVL;
 }
 
-bool parseNum(char *str, int *num, const int max)
-{
-    char *end = NULL;
-    unsigned long u = strtoul(str, &end, 0);
-    if(errno == ERANGE){
-        errno = 0;
-        return false;
-    }
-    if((int)u > max)
-        return false;
-    *num = (int)u;
-    return true;
-}
-
 bool actionValidate(const Board board, char *str, Action *act)
 {
-    if(NULL == str)
-        return false;
-
-    const uint slen = strnlen(str, 64);
-    if(slen == 63 && str[62] != '\0'){
-        flush();
+    const uint slen = strlen(str);
+    if(str[slen-1] != '\n'){
+        int c = ' ';
+        while((c = fgetc(stdin)) != '\n' && c != '\0');
         return false;
     }
-
-    if(slen < 5 || slen > 7){
-        if(str[slen] != '\0' && str[slen] != '\n')
-        printf("1 %u\n", slen);
+    // "r 10 10"
+    // "r 1 1"
+    if((act->type = actionChar(*str)) == TS_INVL || str[1] != ' ')
         return false;
-    }
-
-    if((act->type = actionChar(str[0])) == TS_INVL || !isspace(str[1]) || !isdigit(str[2])){
-        printf("2\n");
+    str+=2;
+    if(!parseLe2(&str, &(act->pos.x)) || *str != ' ')
         return false;
-    }
-
-    if(!parseNum(&str[2], &(act->pos.x), board.len.x)){
-        printf("3\n");
+    str++;
+    if(!parseLe2(&str, &(act->pos.y)) || *str != '\n')
         return false;
-    }
-
-    if(isdigit(str[3])){
-        str = &str[5];
-    }else{
-        if(!isspace(str[3])){
-            printf("4\nstr: \"%s\"\n", str);
-            return false;
-        }
-        str = &str[4];
-    }
-
-    if(!isdigit(*str)){
-        printf("5\nstr: \"%s\"\n", str);
+    if(!inBound(act->pos, board.len))
         return false;
-    }
-
-    if(!parseNum(str, &(act->pos.y), board.len.y)){
-        printf("6\nstr: \"%s\"\n", str);
-        return false;
-    }
-
-    if(str[1] != '\n' && str[2] != '\n'){
-        printf("7\nstr: \"%s\"\n", str);
-        return false;
-    }
-
     return true;
 }
 
@@ -404,10 +301,12 @@ Action actionParse(const Board board)
 {
     Action act = {0};
     while(1){
-        char buf[64] = {0};
-        buf[0] = '\0';
+        char buff[16] = {0};
+        buff[0] = '\0';
         fputs("Enter an action or ? for help.\n", stdout);
-        if(!fgets(buf, 64, stdin) || strnlen(buf, 16) < 5 || buf[0] == '?' || !actionValidate(board, buf, &act))
+        char* buf = fgets(buff, 16, stdin);
+        printf("buf[%zu]:\"%s\"\n", strlen(buf), buf);
+        if(!buf || buf[0] == '?' || !actionValidate(board, buf, &act))
             actionHelp();
         else
             break;
@@ -416,21 +315,25 @@ Action actionParse(const Board board)
     return act;
 }
 
-int main(int argc, char** argv)
+Board boardArgs(int argc, char** argv)
 {
     Board board = {0};
     if(argc == 1){
-        board.len.x = 30;
-        board.len.y = 16;
-        board.numBombs = 99;
+        board.len.x = 12;
+        board.len.y = 8;
+        board.numBombs = 32;
     }else if(argc == 4){
         board = boardParse(&argv[1]);
     }else{
         usage();
-        exit(EXIT_FAILURE);
     }
-    board = boardAlloc(board);
+    return board;
+}
+
+int main(int argc, char** argv)
+{
     srand(time(0));
+    Board board = boardAlloc(boardArgs(argc, argv));
     boardPrintInfo(board);
     boardPrint(board, false);
     Action act = {0};
@@ -438,6 +341,7 @@ int main(int argc, char** argv)
         act = actionParse(board);
     }while(act.type != TS_REVL);
     board = boardPlaceBombs(board, act.pos);
+
     while(board.state == G_PLAY){
         boardPrint(board, false);
         act = actionParse(board);
